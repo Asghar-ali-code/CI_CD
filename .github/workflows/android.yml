@@ -1,0 +1,91 @@
+name: Android APK Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+jobs:
+  build:
+    # For pull_request events, only run if the PR was actually merged
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout source code ───────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up JDK ─────────────────────────────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # ── 3. Grant execute permission for gradlew ────────────────────────────
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # ── 4. Cache Gradle dependencies ──────────────────────────────────────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ── 5. Build debug APK ────────────────────────────────────────────────
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      # ── 6. (Optional) Build release APK – requires keystore secrets ───────
+      # Uncomment this block and add the secrets below to your repo if you
+      # want a signed release APK in addition to the debug one.
+      #
+      # - name: Build Release APK
+      #   env:
+      #     KEYSTORE_FILE:      ${{ secrets.KEYSTORE_FILE }}        # base64-encoded keystore
+      #     KEYSTORE_PASSWORD:  ${{ secrets.KEYSTORE_PASSWORD }}
+      #     KEY_ALIAS:          ${{ secrets.KEY_ALIAS }}
+      #     KEY_PASSWORD:       ${{ secrets.KEY_PASSWORD }}
+      #   run: |
+      #     echo "$KEYSTORE_FILE" | base64 --decode > app/release.keystore
+      #     ./gradlew assembleRelease \
+      #       -Pandroid.injected.signing.store.file=app/release.keystore \
+      #       -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+      #       -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+      #       -Pandroid.injected.signing.key.password=$KEY_PASSWORD \
+      #       --stacktrace
+
+      # ── 7. Upload APK as build artifact ───────────────────────────────────
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14          # keep the artifact for 14 days
+
+      # ── 8. (Optional) Comment APK download link on the PR ─────────────────
+      - name: Comment APK link on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context. repo.owner,
+              repo: context. repo.repo,
+              body: `✅ **APK built successfully!**\n\nDownload the debug APK from the [Actions run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) artifacts section.`
+            })
